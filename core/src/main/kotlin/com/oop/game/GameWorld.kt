@@ -118,9 +118,7 @@ abstract class GameWorld(
      *   gameObjects.forEach { it.update(delta) } 처럼 줄일 수 있다.
      */
     protected fun updateAllObjects(delta: Float) {
-        for (obj in gameObjects) {
-            obj.update(delta)
-        }
+        gameObjects.forEach { it.update(delta) }
     }
 
     /**
@@ -134,15 +132,7 @@ abstract class GameWorld(
      *   gameObjects.removeAll { !it.isAlive() } 한 줄로 대체 가능.
      */
     protected fun removeDead() {
-        val toRemove = mutableListOf<GameObject>()
-        for (obj in gameObjects) {
-            if (!obj.isAlive()) {
-                toRemove.add(obj)
-            }
-        }
-        for (obj in toRemove) {
-            gameObjects.remove(obj)
-        }
+        gameObjects.removeAll { !it.isAlive() }
     }
 
     /**

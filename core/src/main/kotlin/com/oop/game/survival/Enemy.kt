@@ -1,9 +1,12 @@
-package com.oop.game.example
+package com.oop.game.survival
 
 import com.badlogic.gdx.Gdx
+import com.badlogic.gdx.graphics.Color
 import com.badlogic.gdx.graphics.Texture
 import com.badlogic.gdx.graphics.g2d.SpriteBatch
+import com.badlogic.gdx.math.Vector2
 import com.oop.game.GameObject
+import com.oop.game.survival.Attack
 
 /**
  * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -24,33 +27,36 @@ import com.oop.game.GameObject
  * @param minX 왕복 이동의 왼쪽 한계 (보통 0f)
  * @param maxX 왕복 이동의 오른쪽 한계 (보통 worldWidth)
  */
-class ExampleEnemy(
+class Enemy(
     x: Float,
     y: Float,
     private val minX: Float,
-    private val maxX: Float
+    private val maxX: Float,
+    private val player: Player
 ) : GameObject(x, y, 40f, 40f) {
 
     // 이미지 로딩 — src/main/resources/enemy.png.
     private val texture = Texture(Gdx.files.internal("enemy.png"))
 
-    private val speed = 150f
+    private var speed = 150f
 
-    // 현재 진행 방향 — +1 이면 오른쪽, -1 이면 왼쪽.
-    //   var 로 선언한 이유: 경계에서 반대로 뒤집혀야 하므로 값이 변함.
-    private var direction = 1f
+    val MAXHP = 100
+    var hp = MAXHP
+        private set
 
     override fun update(delta: Float) {
-        // 수평 이동: 속도 × 방향 × 시간
-        x += speed * direction * delta
+        val direction = Vector2(player.x - x, player.y - y).nor()
+        x += speed * direction.x * delta
+        y += speed * direction.y * delta
 
-        // 경계에 닿으면 제자리에 붙이고 방향 반전.
-        if (x <= minX) {
-            x = minX
-            direction = 1f
-        } else if (x + width >= maxX) {
-            x = maxX - width
-            direction = -1f
+        if (player.isShadowVeilActive() && player.useShadowVeil()) {
+            val distance = Vector2.dst(x, y, player.x, player.y)
+            if (distance < 500f) {
+                speed = 725F
+            }
+            else {
+                speed = 150f
+            }
         }
     }
 
@@ -60,10 +66,14 @@ class ExampleEnemy(
      *   더 크게 보이게 하려면 width/height 를 늘리면 자동 확대된다.
      */
     override fun draw(batch: SpriteBatch) {
+        batch.color = Color.RED
         batch.draw(texture, x, y, width, height)
     }
 
     override fun dispose() {
         texture.dispose()
     }
+
+    fun collisionAttack() { hp -= Attack.DAMAGE }
+    fun isEnemyAlive(): Boolean = hp > 0
 }
