@@ -1,12 +1,19 @@
-package com.oop.game.example
+package com.oop.game.survival
 
 import com.badlogic.gdx.Gdx
+import com.badlogic.gdx.Input
 import com.badlogic.gdx.graphics.Color
+import com.badlogic.gdx.graphics.GL20
 import com.badlogic.gdx.graphics.Texture
 import com.badlogic.gdx.graphics.g2d.SpriteBatch
+import com.badlogic.gdx.graphics.glutils.ShapeRenderer
+import com.badlogic.gdx.math.MathUtils
+import com.badlogic.gdx.math.Vector2
 import com.oop.game.GameWorld
 import com.oop.game.InputHandler
+import java.util.Vector
 import kotlin.math.floor
+import kotlin.random.Random
 
 /**
  * ════════════════════════════════════════════════════════════
@@ -45,7 +52,7 @@ import kotlin.math.floor
  * @param worldWidth   월드 전체 너비 (화면보다 크면 WASD 로 탐험 가능)
  * @param worldHeight  월드 전체 높이
  */
-class ExampleWorld(
+class SurvivalWorld(
     screenWidth: Float,
     screenHeight: Float,
     worldWidth: Float,
@@ -63,25 +70,30 @@ class ExampleWorld(
      */
     private enum class GameState {
         IN_PLAY,
+        LEVEL_UP,
         GAME_OVER
     }
 
     // 플레이어 — 월드 중앙 하단에서 시작.
     //   월드 크기를 함께 넘겨서, 경계 밖으로 못 나가게 한다.
-    private val player = ExamplePlayer(
+    private val player = Player(
         x = worldWidth / 2 - 15f,   // 가로 30 의 절반을 빼서 정확히 중앙
-        y = 50f,
+        y = worldHeight / 2,
         worldWidth = worldWidth,
         worldHeight = worldHeight
     )
 
     // 적 — 월드 상단에서 좌우 왕복.
-    private val enemy = ExampleEnemy(
+    private val enemy = Enemy(
         x = 100f,
         y = worldHeight - 100f,
         minX = 0f,
-        maxX = worldWidth
+        maxX = worldWidth,
+        player = player
     )
+
+    private val spawnCoolTime = 1F
+    private var spawnCycle = 0F
 
     // 현재 게임 상태 — 입력/충돌에 따라 IN_PLAY ↔ GAME_OVER 로 전환된다.
     private var state = GameState.IN_PLAY
@@ -117,6 +129,7 @@ class ExampleWorld(
     override fun update(delta: Float) {
         when (state) {
             GameState.IN_PLAY -> updateInPlay(delta)
+            GameState.LEVEL_UP -> updateLevelUp()
             GameState.GAME_OVER -> updateGameOver()
         }
     }
@@ -125,11 +138,8 @@ class ExampleWorld(
     private fun updateInPlay(delta: Float) {
         // ── 카메라 이동 (WASD) ──
         //   offsetX/Y 를 바꾸면 카메라가 월드 안에서 움직인다.
-        val cameraSpeed = 200f * delta
-        if (InputHandler.isKeyPressed(InputHandler.W)) offsetY += cameraSpeed
-        if (InputHandler.isKeyPressed(InputHandler.S)) offsetY -= cameraSpeed
-        if (InputHandler.isKeyPressed(InputHandler.A)) offsetX -= cameraSpeed
-        if (InputHandler.isKeyPressed(InputHandler.D)) offsetX += cameraSpeed
+        offsetX = player.x - screenWidth/2
+        offsetY = player.y - screenHeight/2
 
         // 카메라가 월드 경계 밖을 보여주지 않도록 clamp.
         //   보여주는 영역이 [offset, offset+screen] 이어야 하므로
@@ -140,18 +150,156 @@ class ExampleWorld(
         // ── 1) 게임 객체 갱신 — 각자 한 프레임씩 진행 ──
         updateAllObjects(delta)
 
+        spawnCycle += delta
+
+        if (spawnCycle > spawnCoolTime) {
+            spawnCycle = 0F
+        }
+
+        if (canSpawn()) {
+            val side = MathUtils.random(3)
+            val position: Vector2
+            when (side) {
+                0 -> {
+                    position = Vector2(MathUtils.random(offsetX, offsetX + screenWidth)
+                        , offsetY + screenHeight)
+                }
+                1 -> {
+                    position = Vector2(MathUtils.random(offsetX, offsetX + screenWidth)
+                        , offsetY)
+                }
+                2 -> {
+                    position = Vector2(offsetX + screenWidth
+                        , MathUtils.random(offsetY, offsetY + screenHeight))
+                }
+                3 -> {
+                    position = Vector2(offsetX
+                        , MathUtils.random(offsetY, offsetY + screenHeight))
+                }
+                else -> {
+                    position = Vector2(0f, 0f)
+                }
+            }
+            add(Enemy(position.x, position.y,
+                minX = 0f,
+                maxX = worldWidth,
+                player = player))
+        }
+
         // ── 2) 상호작용 결정 — 누가 누구와 부딪혀 어떻게 되는지 ──
         //   collidesWith 는 GameObject 의 메서드 → 모든 게임 객체가 자동으로 가짐.
         //   이 예제에선 충돌 시 객체를 죽이지 않고 게임 상태만 바꾼다.
         //   (총알 게임이라면 여기서 bullet.kill(), enemy.kill() 같은 처리)
-        if (player.collidesWith(enemy)) {
-            state = GameState.GAME_OVER
+        val enemies = getObjects().filterIsInstance<Enemy>()
+        val attacks = getObjects().filterIsInstance<Attack>()
+        val explosions = getObjects().filterIsInstance<Explosion>()
+
+        if (player.useVoidShift() && player.canVoidShift()) {
+            val teleportDis = 200F
+            val moveX = (if (InputHandler.isKeyPressed(InputHandler.RIGHT)) 1F else 0F) -
+                    (if (InputHandler.isKeyPressed(InputHandler.LEFT)) 1F else 0F)
+            val moveY = (if (InputHandler.isKeyPressed(InputHandler.UP)) 1F else 0F) -
+                    (if (InputHandler.isKeyPressed(InputHandler.DOWN)) 1F else 0F)
+            val direction = Vector2(moveX, moveY).nor()
+
+            add(VoidShadow(player.x - 100F, player.y - 100F))
+
+            player.x += direction.x * teleportDis
+            player.y += direction.y * teleportDis
+        }
+
+        if (player.useShadowVeil() && player.canShadowVeil()) {
+            player.changeShadowVeilActivity()
+        }
+
+        for (e in enemies) {
+            if (!player.isInvincible() && player.collidesWith(e)) {
+                if (player.isShadowVeilActive() && Random.nextFloat() < 0.5f) {
+                    continue
+                }
+                player.collisionEnemy()
+                player.changeInvincibility()
+
+                if (player.hp <= 0) {
+                    state = GameState.GAME_OVER
+                }
+            }
+        }
+
+        if (player.isInvincible()) {
+            player.invincibilityCycle += delta
+            if (player.invincibilityCycle > player.invincibilityCoolTime) {
+                player.invincibilityCycle = 0F
+                player.changeInvincibility()
+            }
+        }
+
+        for (e in enemies) {
+            for (a in attacks) {
+                if (e.collidesWith(a)) {
+                    remove(a)
+                    e.collisionAttack()
+                    if (!e.isEnemyAlive())  {
+                        player.addExp()
+                        remove(e)
+                    }
+                }
+            }
+        }
+
+        if (player.exp >= player.requiredExp(player.level)) {
+            state = GameState.LEVEL_UP
+            player.levelUp()
+        }
+
+        if (player.canAttack()) {
+            val closestEnemy =
+                enemies.minByOrNull { Vector2.dst(player.x, player.y, it.x, it.y ) }
+            val direction = closestEnemy?.let { Vector2(it.x - player.x
+                , it.y - player.y).nor() }
+            add(Attack(player.x + player.width/2, player.y + player.height/2,
+                direction, worldWidth, worldHeight))
+        }
+
+        if (player.useRuinFlare() && player.canExplosion()) {
+            val closestEnemy =
+                enemies.minByOrNull { Vector2.dst(player.x, player.y, it.x, it.y ) }
+                    ?: Enemy(0f, 0f, 0f, 0f, player)
+            add(Explosion(closestEnemy.x + closestEnemy.width / 2,
+                closestEnemy.y + closestEnemy.height / 2, 3F))
+        }
+
+        for (e in enemies) {
+            for (a in explosions) {
+                if (e.collidesWith(a)) {
+                    e.collisionAttack()
+                    if (!e.isEnemyAlive())  {
+                        player.addExp()
+                        remove(e)
+                    }
+                }
+            }
         }
 
         // ── 3) 죽은 객체 정리 ──
         //   현재 예제에선 아무 것도 안 죽으므로 영향 없지만,
         //   bullet/enemy 가 추가될 때를 대비한 표준 흐름이다.
         removeDead()
+    }
+
+    private fun updateLevelUp() {
+        if (InputHandler.isKeyJustPressed(InputHandler.NUM_1)) {
+            player.addSkill("Shadow Veil")
+            state = GameState.IN_PLAY
+        }
+        else if (InputHandler.isKeyJustPressed(InputHandler.NUM_2)) {
+            player.addSkill("Ruin Flare")
+            state = GameState.IN_PLAY
+        }
+        else if (InputHandler.isKeyJustPressed(InputHandler.NUM_3)) {
+            player.addSkill("Void Shift")
+            state = GameState.IN_PLAY
+        }
     }
 
     /** GAME_OVER 상태에서 매 프레임 처리 — ESC 입력만 감시한다. */
@@ -221,6 +369,7 @@ class ExampleWorld(
             GameState.IN_PLAY -> {
                 // 플레이 중에는 추가로 그릴 것 없음
             }
+            GameState.LEVEL_UP -> drawLevelUpScreen()
             GameState.GAME_OVER -> drawGameOverOverlay()
         }
     }
@@ -230,7 +379,9 @@ class ExampleWorld(
         // 1) UI 텍스트 (화면 고정) — 좌측 상단 HP 표시.
         //    카메라가 움직여도 항상 이 위치에 있다.
         drawTextOnScreen(
-            text = "HP: 3",
+            text = "HP: ${player.hp} / ${player.MAXHP}\n" +
+                    "LEVEL: ${player.level}\n" +
+                    "EXP: ${player.exp} / ${player.requiredExp(player.level)}",
             x = 10f,
             y = screenHeight - 10f,   // 화면 y 축은 위로 증가 → 맨 위가 screenHeight
             color = Color.YELLOW,
@@ -245,6 +396,65 @@ class ExampleWorld(
             worldY = worldHeight / 2,
             color = Color.CYAN,
             scale = 1.5f
+        )
+    }
+
+    private fun drawLevelUpScreen() {
+        drawTextOnScreen(
+            text = "LEVEL UP!",
+            x = screenWidth / 2 - 100f,
+            y = screenHeight * 0.8f,
+            color = Color.YELLOW,
+            scale = 2f
+        )
+        drawTextOnScreen(
+            text = "Choose your skill:",
+            x = screenWidth / 2 - 120f,
+            y = screenHeight * 0.7f,
+            color = Color.WHITE,
+            scale = 1.5f
+        )
+        drawTextOnScreen(
+            text = "1. Shadow Veil",
+            x = screenWidth / 2 - 150f,
+            y = screenHeight * 0.5f,
+            color = Color.CYAN,
+            scale = 1.2f
+        )
+        drawTextOnScreen(
+            text = "   Increases evasion for a short time.",
+            x = screenWidth / 2 - 150f,
+            y = screenHeight *  0.5f - 30f,
+            color = Color.GRAY,
+            scale = 1f
+        )
+        drawTextOnScreen(
+            text = "2. Ruin Flare",
+            x = screenWidth / 2 - 150f,
+            y = screenHeight * 0.4f,
+            color = Color.RED,
+            scale = 1.2f
+        )
+        drawTextOnScreen(
+            text = "   Causes an explosion with damage over time.",
+            x = screenWidth / 2 - 150f,
+            y = screenHeight *  0.4f - 30f,
+            color = Color.GRAY,
+            scale = 1f
+        )
+        drawTextOnScreen(
+            text = "3. Void Shift",
+            x = screenWidth / 2 - 150f,
+            y = screenHeight * 0.3f,
+            color = Color.PURPLE,
+            scale = 1.2f
+        )
+        drawTextOnScreen(
+            text = "   Teleports and leaves an explosive afterimage.",
+            x = screenWidth / 2 - 150f,
+            y = screenHeight *  0.3f - 30f,
+            color = Color.GRAY,
+            scale = 1f
         )
     }
 
@@ -271,4 +481,6 @@ class ExampleWorld(
         super.dispose()
         tileTexture.dispose()
     }
+
+    fun canSpawn(): Boolean = spawnCycle <= 0F
 }

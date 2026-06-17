@@ -57,4 +57,7 @@ object InputHandler {
     val A = Input.Keys.A
     val S = Input.Keys.S
     val D = Input.Keys.D
+    val NUM_1 = Input.Keys.NUM_1
+    val NUM_2 = Input.Keys.NUM_2
+    val NUM_3 = Input.Keys.NUM_3
 }
