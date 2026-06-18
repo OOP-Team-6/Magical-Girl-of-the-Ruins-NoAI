@@ -25,7 +25,7 @@ class MainMenuScreen(
     }
 
     override fun drawBackground(batch: SpriteBatch) {
-        backgroundTexture.let {
+        backgroundTexture?.let {
             batch.draw(it, 0f, 0f, screenWidth, screenHeight)
         }
         bannerTexture.run {
